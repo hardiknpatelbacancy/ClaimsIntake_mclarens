@@ -32,7 +32,7 @@ Clean Architecture, four projects under `src/`, dependencies point inward only:
 - **Domain** → nothing (zero NuGet references — keep it that way)
 - **Application** → Domain (MediatR, FluentValidation)
 - **Infrastructure** → Application + Domain (EF Core, SQL Server)
-- **API** → composition root (Minimal APIs, Asp.Versioning, Swashbuckle, Serilog)
+- **API** → composition root (Minimal APIs for v1, attribute-routed controllers for v2, Asp.Versioning, Swashbuckle, Serilog)
 
 `ARCHITECTURE.md` is the original design document, but the implementation deliberately diverges from it in two places (explicit user decisions — don't "fix" the code to match the doc):
 
@@ -75,12 +75,12 @@ EF configuration is annotation-free, via `IEntityTypeConfiguration<>` classes in
 
 Versions are driven entirely by `Asp.Versioning`; the literal string `"v1"` must not appear in routes, Swagger config, or generated URLs:
 
-- Routes use the template `/api/v{version:apiVersion}/claims`; the endpoint group declares its versions via `.WithApiVersionSet(...)` and `.HasApiVersion(new ApiVersion(1, 0))`.
-- Swagger documents are generated per *discovered* version: `ConfigureSwaggerGenOptions` (in `API\Swagger`) loops over `IApiVersionDescriptionProvider.ApiVersionDescriptions`, and the Swagger UI loops over `app.DescribeApiVersions()` — which only works because it runs **after** `MapClaimEndpoints()` in `Program.cs`; keep that ordering.
+- Routes use the template `/api/v{version:apiVersion}/claims`. The v1 minimal-API endpoint group declares its versions via `.WithApiVersionSet(...)` and `.HasApiVersion(new ApiVersion(1, 0))`; the v2 controller (`API\Controllers\ClaimsController.cs`) declares its version with `[ApiVersion(2.0)]` (controller versioning support comes from `.AddMvc()` on the versioning builder in `Program.cs`).
+- Swagger documents are generated per *discovered* version: `ConfigureSwaggerGenOptions` (in `API\Swagger`) loops over `IApiVersionDescriptionProvider.ApiVersionDescriptions`, and the Swagger UI loops over `app.DescribeApiVersions()` — which only works because it runs **after** `MapClaimEndpoints()` and `MapControllers()` in `Program.cs`; keep that ordering.
 - Group names come from `AddApiExplorer` (`GroupNameFormat = "'v'VVV"`, `SubstituteApiVersionInUrl = true`).
 - `Location` headers are built with `Results.CreatedAtRoute(...)` passing the requested version via the `httpContext.RequestedApiVersion` extension property, not a formatted URL string. (In Asp.Versioning 10 the old `GetRequestedApiVersion()` method no longer exists — it became C# extension properties on `HttpContext`.)
 
-To add a v2: give a (new) endpoint group `.HasApiVersion(new ApiVersion(2, 0))` — Swagger and the UI dropdown pick it up automatically with zero config changes.
+v2 exists and is controller-based, exposing only `GET /api/v2/claims`; it reuses the same `GetClaimsQuery` pipeline as v1. To add another version: declare it on a (new) endpoint group via `.HasApiVersion(...)` or on a controller via `[ApiVersion(...)]` — Swagger and the UI dropdown pick it up automatically with zero config changes.
 
 ### Tests
 

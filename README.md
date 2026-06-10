@@ -23,7 +23,12 @@ Tests: `dotnet test ClaimsIntake.slnx` — domain state-machine matrix, validato
 
 ## API surface
 
-All routes are versioned under `/api/v1`.
+Two API versions are live, deliberately implemented in both endpoint styles:
+
+- **v1** (`/api/v1/...`) — the full surface, implemented as **Minimal APIs** (`API\Endpoints\ClaimEndpoints.cs`).
+- **v2** (`/api/v2/...`) — **controller-based** (`API\Controllers\ClaimsController.cs`), currently exposing only the claims list endpoint.
+
+Both styles plug into the same `Asp.Versioning` machinery (an `ApiVersionSet` on the minimal endpoint group, an `[ApiVersion]` attribute on the controller), run the same MediatR pipeline and validators, and share the same RFC 7807 error contract — the Swagger UI shows one document per version with zero version-specific configuration.
 
 | Method | Route | Purpose | Success | Errors |
 |---|---|---|---|---|
@@ -31,6 +36,7 @@ All routes are versioned under `/api/v1`.
 | GET | `/api/v1/claims` | List claims (filters: `status`, `policyNumber`, `submittedFrom`, `submittedTo`; paged via `pageNumber`/`pageSize`, default 20, max 100) | 200 | 400, 422 |
 | GET | `/api/v1/claims/{id}` | Get a claim by id | 200 | 404 |
 | PATCH | `/api/v1/claims/{id}/status` | Transition a claim's status | 200 | 400, 404, 409, 422 |
+| GET | `/api/v2/claims` | List claims (controller-based; same filters and paging as v1) | 200 | 400, 422 |
 
 Claim lifecycle:
 
@@ -59,7 +65,7 @@ All errors are RFC 7807 `application/problem+json`. Validation failures return *
 
 **EF Core code-first, persistence-ignorant domain.** Mapping lives in `IEntityTypeConfiguration<>` classes (no attributes on the entity), `ClaimStatus` is persisted as a string (readable in queries, safe against enum reordering), and indexes on `PolicyNumber`, `Status`, and `SubmittedAt` match the list endpoint's filters.
 
-**Versioning machinery from day one — with no hardcoded versions.** URL-segment versioning via `Asp.Versioning`, with only v1 shipped. Routes use the `/api/v{version:apiVersion}/...` template, endpoint groups declare their versions through an `ApiVersionSet`, and Swagger documents (and the UI dropdown) are generated per *discovered* version from `IApiVersionDescriptionProvider` — the literal string "v1" appears nowhere in routes or Swagger configuration. Adding a v2 means giving an endpoint group `.HasApiVersion(new ApiVersion(2, 0))`; everything else picks it up automatically.
+**Versioning machinery from day one — with no hardcoded versions.** URL-segment versioning via `Asp.Versioning`. Routes use the `/api/v{version:apiVersion}/...` template; minimal-API endpoint groups declare their versions through an `ApiVersionSet`, attribute-routed controllers declare theirs with `[ApiVersion]`, and Swagger documents (and the UI dropdown) are generated per *discovered* version from `IApiVersionDescriptionProvider` — no version literal appears in routes or Swagger configuration. v2 (the controller-based `ClaimsController`) was added exactly this way: declare the version on the controller, `MapControllers()` in `Program.cs`, and the v2 Swagger document appeared with no other changes. A future v3 works the same in either style.
 
 **Structured logging with Serilog**, configured entirely from `appsettings.json`, with request logging and EF command logging surfaced in Development.
 

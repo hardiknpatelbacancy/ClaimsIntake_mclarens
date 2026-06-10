@@ -18,12 +18,16 @@ builder.Services.RegisterInfrastructure(builder.Configuration);
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
+// v1 is Minimal APIs (ClaimEndpoints); v2 is controller-based (Controllers\ClaimsController).
+builder.Services.AddControllers();
+
 builder.Services.AddApiVersioning(options =>
 {
     options.DefaultApiVersion = new ApiVersion(1, 0);
     options.AssumeDefaultVersionWhenUnspecified = true;
     options.ReportApiVersions = true;
 })
+.AddMvc() // versioning support for attribute-routed controllers
 .AddApiExplorer(options =>
 {
     // Group names become "v1", "v2", ... and drive the Swagger doc names.
@@ -45,9 +49,9 @@ app.UseExceptionHandler();
 app.UseSerilogRequestLogging();
 
 app.MapClaimEndpoints();
-// Adding a v2 later requires no Swagger changes: give the (new) endpoint group
-//   .HasApiVersion(new ApiVersion(2, 0))
-// and Swagger will pick it up automatically.
+// Versioned controllers (v2). Like MapClaimEndpoints, this must run before
+// DescribeApiVersions() below so the Swagger UI discovers every version.
+app.MapControllers();
 app.MapHealthChecks("/health");
 
 if (app.Environment.IsDevelopment())

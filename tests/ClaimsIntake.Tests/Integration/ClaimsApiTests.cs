@@ -169,6 +169,41 @@ public class ClaimsApiTests : IClassFixture<ClaimsApiFactory>
     }
 
     [Fact]
+    public async Task GetClaimsV2_ReturnsClaims()
+    {
+        // Distinct policy number isolates this test from data created by the others.
+        var policyNumber = "POL-9500";
+        var id = await SubmitClaimAsync(policyNumber);
+
+        var response = await _client.GetAsync($"/api/v2/claims?policyNumber={policyNumber}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var ids = body.RootElement.EnumerateArray().Select(c => c.GetProperty("id").GetGuid()).ToList();
+        Assert.Contains(id, ids);
+    }
+
+    [Fact]
+    public async Task GetClaimsV2_InvalidStatus_Returns422()
+    {
+        // The v2 controller runs the same MediatR validation pipeline as v1.
+        var response = await _client.GetAsync("/api/v2/claims?status=Banana");
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.True(body.RootElement.GetProperty("errors").TryGetProperty("status", out _));
+    }
+
+    [Fact]
+    public async Task PostClaimsV2_IsNotSupported()
+    {
+        // Only GetClaims exists in v2; POST is declared for v1 only.
+        var response = await _client.PostAsJsonAsync("/api/v2/claims", ValidPayload("POL-9600"));
+
+        Assert.False(response.IsSuccessStatusCode);
+    }
+
+    [Fact]
     public async Task GetUnknownClaim_Returns404ProblemDetails()
     {
         var response = await _client.GetAsync($"/api/v1/claims/{Guid.NewGuid()}");
