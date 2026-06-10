@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(dotnet add *)",
+      "PowerShell(dotnet build *)",
+      "PowerShell(dotnet ef *)",
+      "PowerShell(dotnet tool install *)",
+      "PowerShell(dotnet run *)"
+    ]
+  }
+}

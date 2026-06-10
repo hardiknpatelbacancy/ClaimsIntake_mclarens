@@ -1,0 +1,6 @@
+bin/
+obj/
+*.user
+.vs/
+*.db
+appsettings.Development.json   # if it contains real connection strings
