@@ -4,13 +4,15 @@
 
 **Guiding principle:** Demonstrate judgment, not pattern bingo. Every layer and pattern below earns its place; everything that doesn't is explicitly cut in §6.
 
-> **Implementation status (June 2026).** This document is the original design record; the implemented code deliberately diverges from it in five places (see `README.md` for current rationale and `CLAUDE.md` for working conventions):
+> **Implementation status (June 2026).** This document is the original design record; the implemented code deliberately diverges from it in seven places (see `README.md` for current rationale and `CLAUDE.md` for working conventions):
 >
 > 1. **MediatR is used** (contra §2), as an explicit exercise requirement — its `ValidationBehaviour` pipeline is the single validation execution point. Pinned to the Apache-licensed 12.x line; do not upgrade to 13.x (commercial license).
 > 2. **A generic `IRepository<T>` exists alongside `IClaimRepository`** (contra §4), also an explicit requirement; both resolve to the same scoped `ClaimRepository`.
 > 3. **The domain model is a single `Claim` aggregate** — no `Claimant`/`Policy`/`ClaimDocument`/`ClaimStatusHistory` entities, no `ClaimNumber`, no `RowVersion` yet (§3 describes the aspirational model).
 > 4. **The lifecycle differs from §3's enum:** implemented as `Submitted → UnderReview → AdditionalInfoRequired (→ UnderReview) | Approved | Denied`, with no Draft, Closed, or appeal transition.
 > 5. **Validation failures map to HTTP 422** (not the 400 stated in §5), distinguishing malformed input (422) from illegal state transitions (409).
+> 6. **v2 has shipped, and it is controller-based** (contra §5's "v1 only" policy and Minimal-API-only style): `GET /api/v2/claims` lives in an attribute-routed controller reusing the same `GetClaimsQuery` pipeline, demonstrating that both endpoint styles coexist under the same `Asp.Versioning` machinery.
+> 7. **Tests live in a single project**, `tests\ClaimsIntake.Tests` (not the separate `UnitTests`/`IntegrationTests` projects in §1's diagram), with `Domain\`, `Application\`, and `Integration\` suites inside. Integration tests run on SQLite in-memory via `WebApplicationFactory`, not LocalDB/Testcontainers.
 
 ---
 
@@ -19,17 +21,16 @@
 Classic Clean Architecture, four projects plus tests. Dependencies point inward only.
 
 ```
-ClaimsIntakeAPI.sln
+ClaimsIntake.slnx
 │
 ├── src/
 │   ├── ClaimsIntake.Domain            (Core — no dependencies)
 │   ├── ClaimsIntake.Application       (Core — depends on Domain)
 │   ├── ClaimsIntake.Infrastructure    (Adapter — depends on Application, Domain)
-│   └── ClaimsIntake.Api               (Host — composition root, depends on all)
+│   └── ClaimsIntake.API               (Host — composition root, depends on all)
 │
 └── tests/
-    ├── ClaimsIntake.UnitTests         (Domain + Application, no I/O)
-    └── ClaimsIntake.IntegrationTests  (API-level, WebApplicationFactory + real EF pipeline)
+    └── ClaimsIntake.Tests             (single project: Domain, Application, and Integration suites)
 ```
 
 | Project | Layer | Responsibility |
@@ -37,9 +38,8 @@ ClaimsIntakeAPI.sln
 | **ClaimsIntake.Domain** | Domain | Entities, enums, domain invariants (state-transition rules live *here*, not in services), domain exceptions. Zero NuGet references — not even EF. |
 | **ClaimsIntake.Application** | Application | Use cases (commands/queries as plain handler classes), request/response DTOs, validation (FluentValidation), abstractions the infrastructure must implement (`IClaimRepository`, `IUnitOfWork`, `IClaimsDbReader`). |
 | **ClaimsIntake.Infrastructure** | Infrastructure | EF Core `DbContext`, entity configurations (`IEntityTypeConfiguration<>`), migrations, repository implementations, SQL Server specifics. |
-| **ClaimsIntake.Api** | Presentation/Host | Minimal API endpoint definitions, API versioning, ProblemDetails error mapping, DI wiring, Swagger. Endpoints are thin: bind → call handler → map result to HTTP. |
-| **ClaimsIntake.UnitTests** | Tests | Domain invariants (especially the claim state machine) and application handlers with faked abstractions. The state machine tests are the highest-value tests in the solution. |
-| **ClaimsIntake.IntegrationTests** | Tests | Full HTTP slice via `WebApplicationFactory`, EF against SQL (LocalDB or Testcontainers). Verifies routing, validation, persistence, and versioning actually compose. |
+| **ClaimsIntake.API** | Presentation/Host | Minimal API endpoint definitions (v1) and an attribute-routed controller (v2), API versioning, ProblemDetails error mapping, DI wiring, Swagger. Endpoints are thin: bind → call handler → map result to HTTP. |
+| **ClaimsIntake.Tests** | Tests | One xUnit project with three suites. `Domain\` covers domain invariants (especially the claim state-machine matrix — the highest-value tests in the solution); `Application\` covers validators and handlers with a hand-written `FakeClaimRepository` (no mocking library); `Integration\` runs the full HTTP slice via `WebApplicationFactory` with EF on SQLite in-memory, verifying routing, validation, persistence, and versioning actually compose. |
 
 **Why four projects and not two?** With two (Api + everything), the domain model inevitably leaks EF and HTTP concerns within a sprint or two. With six-plus, you're paying assembly tax for an intake API. Four is the long-standing sweet spot: the compiler enforces the dependency rule, and each project has exactly one reason to change.
 
@@ -125,23 +125,3 @@ With only one true aggregate root (Claim — Claimant and Policy are looked up, 
 
 Cross-cutting API decisions: `ProblemDetails` (RFC 7807) for all errors including domain-exception → 409 and validation → 400 mappings; FluentValidation executed via an endpoint filter; Swagger/OpenAPI per version.
 
----
-
-## 6. Deliberately Skipped — and Why
-
-Listed explicitly because knowing what *not* to build is the actual senior skill being assessed.
-
-| Skipped | Why, specifically |
-|---|---|
-| **AuthN/AuthZ** | Real auth is an identity-provider integration (Entra ID/Auth0), which is configuration, not architecture — and fake auth is worse than none because it implies security that isn't there. The seam is prepared: `ChangedBy` on the audit trail, and endpoint groups where `.RequireAuthorization()` is a one-line addition. |
-| **Messaging / outbox / events** | An intake API has no second consumer yet. Publishing `ClaimSubmitted` events to a bus nobody listens to is speculative generality, and a correct outbox (idempotency, poison handling, ordering) would dominate the exercise. The aggregate's transition methods are the single choke point where domain-event raising plugs in later — the seam exists, the infrastructure doesn't. |
-| **Saga / process manager** | Sagas coordinate multi-service transactions. This is one service with one database; EF's transaction *is* the consistency mechanism. A saga here is a solution shipped before its problem. |
-| **Separate read store / heavy CQRS** | Argued in §2 — the in-code separation is kept, the operational cost is deferred. |
-| **Caching (Redis/output cache)** | Cache invalidation on a stateful lifecycle entity is a correctness risk taken to solve a performance problem we don't have. Indexes (§3) cover this scale. |
-| **Actual file/blob storage** | `ClaimDocument` stores metadata only. Streaming uploads, virus scanning, and SAS tokens are an infrastructure project of their own; the domain model already accounts for the data. |
-| **Multi-tenancy** | Pervasive (query filters, tenant resolution, test matrix) and absent from requirements. Retrofitting is genuinely painful, which is exactly why it must be a deliberate product decision, not an architect's guess. |
-| **Microservices / modular monolith ceremony** | One bounded context, one deployable. The Clean Architecture seams are the extraction points if a split is ever warranted by team or scale — not before. |
-| **Kubernetes/Docker orchestration, resilience policies (Polly), health-check dashboards** | Deployment topology is the client's call. A basic `/health` endpoint ships; the rest is platform engineering, not solution architecture. |
-| **AutoMapper** | Hand-written mapping in handlers: claim DTOs are small, the mapping *is* logic worth seeing in review, and runtime-reflection mapping failures are a classic production foot-gun that saves ~20 lines here. |
-
-**What ships despite the cuts:** optimistic concurrency, a tested state machine, an append-only audit trail, versioning machinery, ProblemDetails, and integration tests through the real pipeline — the things that are expensive to retrofit and cheap to include now.

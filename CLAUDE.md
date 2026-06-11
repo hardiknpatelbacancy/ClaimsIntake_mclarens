@@ -23,7 +23,7 @@ dotnet ef migrations add <Name> --project src\ClaimsIntake.Infrastructure --star
 dotnet ef database update --project src\ClaimsIntake.Infrastructure --startup-project src\ClaimsIntake.API
 ```
 
-Target framework is **net10.0**. The database is SQL Server, configured via the `ClaimsIntake` connection string in `appsettings.json` (there is no Development override — point it at any reachable instance; the API creates and migrates the database on startup in Development). Don't commit real credentials in that file.
+Target framework is **net10.0**. The database is SQL Server, configured via the `ClaimsIntake` connection string in `appsettings.json` (`appsettings.Development.json` exists but only raises Serilog log levels — it does not override the connection string, so point the one in `appsettings.json` at any reachable instance; the API creates and migrates the database on startup in Development). Don't commit real credentials in that file.
 
 ## Architecture
 
@@ -34,7 +34,7 @@ Clean Architecture, four projects under `src/`, dependencies point inward only:
 - **Infrastructure** → Application + Domain (EF Core, SQL Server)
 - **API** → composition root (Minimal APIs for v1, attribute-routed controllers for v2, Asp.Versioning, Swashbuckle, Serilog)
 
-`ARCHITECTURE.md` is the original design document, but the implementation deliberately diverges from it in two places (explicit user decisions — don't "fix" the code to match the doc):
+`ARCHITECTURE.md` is the original design document; its "Implementation status" note at the top enumerates the seven places where the implementation deliberately diverges from it (explicit user decisions — don't "fix" the code to match the doc). The two with hard constraints attached:
 
 - §2 rejects MediatR, but the code **uses MediatR 12.5.0** with a `ValidationBehaviour` pipeline. The 12.x line is pinned for its Apache license; don't bump to 13.x (commercial license).
 - §4 rejects a generic repository, but the code has **both** `IRepository<T>` and `IClaimRepository` (the latter extends the former). Both interfaces live in `Application\Abstractions`; `ClaimRepository` in Infrastructure implements both and is registered so both resolve to the same scoped instance.
